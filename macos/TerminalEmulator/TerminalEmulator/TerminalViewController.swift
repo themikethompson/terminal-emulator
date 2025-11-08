@@ -1,14 +1,17 @@
 import Cocoa
+import Metal
 
 class TerminalViewController: NSViewController {
 
     private var terminalView: TerminalView!
     private var terminal: TerminalCore?
     private var ptySource: DispatchSourceRead?
+    private var visualEffectsManager: VisualEffectsManager?
 
     override func loadView() {
-        // Create terminal view
-        terminalView = TerminalView(frame: NSRect(x: 0, y: 0, width: 800, height: 600))
+        // Create terminal view with Metal support
+        let device = MTLCreateSystemDefaultDevice()
+        terminalView = TerminalView(frame: NSRect(x: 0, y: 0, width: 800, height: 600), device: device)
         self.view = terminalView
     }
 
@@ -29,8 +32,57 @@ class TerminalViewController: NSViewController {
         // Set up PTY monitoring
         setupPTYMonitoring()
 
-        // Initial render
-        terminalView.needsDisplay = true
+        // Set up visual effects (optional - disabled by default)
+        setupVisualEffects()
+
+        // MTKView will automatically render at preferred FPS (60)
+    }
+
+    private func setupVisualEffects() {
+        guard let window = view.window else {
+            // Window not yet available, will set up later
+            return
+        }
+
+        visualEffectsManager = VisualEffectsManager(window: window)
+
+        // Uncomment to enable visual effects by default:
+        // visualEffectsManager?.applyPreset(.subtle)
+        // visualEffectsManager?.installVisualEffectView(in: view)
+    }
+
+    override func viewDidAppear() {
+        super.viewDidAppear()
+
+        // Setup visual effects if not already done (window is now available)
+        if visualEffectsManager == nil, let window = view.window {
+            visualEffectsManager = VisualEffectsManager(window: window)
+        }
+    }
+
+    // MARK: - Visual Effects API
+
+    /// Apply a visual effect preset
+    func applyVisualEffectPreset(_ preset: VisualEffectPreset) {
+        visualEffectsManager?.applyPreset(preset)
+        if visualEffectsManager?.blurEnabled == true {
+            visualEffectsManager?.installVisualEffectView(in: view)
+        }
+    }
+
+    /// Set background opacity
+    func setBackgroundOpacity(_ opacity: CGFloat) {
+        visualEffectsManager?.opacity = opacity
+    }
+
+    /// Enable/disable blur
+    func setBlurEnabled(_ enabled: Bool) {
+        if enabled {
+            visualEffectsManager?.blurEnabled = true
+            visualEffectsManager?.installVisualEffectView(in: view)
+        } else {
+            visualEffectsManager?.blurEnabled = false
+        }
     }
 
     private func setupPTYMonitoring() {
@@ -70,10 +122,7 @@ class TerminalViewController: NSViewController {
             let data = Data(bytes: buffer, count: bytesRead)
             terminal.processBytes(data)
 
-            // Trigger redraw
-            DispatchQueue.main.async { [weak self] in
-                self?.terminalView.needsDisplay = true
-            }
+            // MTKView will automatically redraw (no need to trigger manually)
         } else if bytesRead < 0 {
             // Error or EOF
             print("PTY read error or EOF")
@@ -92,7 +141,7 @@ class TerminalViewController: NSViewController {
 
         if rows != terminal.rows || cols != terminal.cols {
             terminal.resize(rows: rows, cols: cols)
-            terminalView.needsDisplay = true
+            // MTKView will automatically redraw
         }
     }
 
