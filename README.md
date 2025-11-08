@@ -344,11 +344,25 @@ Current test coverage:
 ## Next Steps
 
 ### Integration (Immediate)
-1. **Add all files to Xcode project** (31 new Swift files)
-2. **Build project** (Cmd+B)
-3. **Run and test** (Cmd+R)
-4. **Verify 60 FPS** performance
-5. **Test all features** systematically
+
+**Automated Integration (Recommended):**
+```bash
+./integrate.sh
+```
+
+This script will:
+- Install xcodeproj gem if needed
+- Add all 19 files to Xcode project automatically
+- Configure build phases
+
+**Manual Integration:**
+See [INTEGRATION_README.md](INTEGRATION_README.md) for detailed instructions.
+
+**Then:**
+1. **Build project** (Cmd+B)
+2. **Run and test** (Cmd+R)
+3. **Verify 60 FPS** performance
+4. **Test all features** systematically
 
 ### Testing (Short-term)
 1. **Comprehensive testing** of all 10 phases
