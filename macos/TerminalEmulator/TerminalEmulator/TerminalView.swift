@@ -1,32 +1,42 @@
 import Cocoa
+import MetalKit
 
-class TerminalView: NSView {
+class TerminalView: MTKView {
 
     var terminal: TerminalCore?
+
+    // Metal renderer
+    private var metalRenderer: MetalRenderer?
 
     // Font and cell dimensions
     private var font: NSFont
     private var cellWidth: CGFloat = 0
     private var cellHeight: CGFloat = 0
-    private var baselineOffset: CGFloat = 0
 
     // Cursor
     private var cursorTimer: Timer?
     private var cursorVisible = true
 
-    override init(frame frameRect: NSRect) {
+    // Performance monitoring
+    private var lastFrameTime: CFTimeInterval = 0
+    private var frameCount: Int = 0
+    private var fps: Double = 0
+
+    override init(frame frameRect: NSRect, device: MTLDevice?) {
         // Use a monospace font
         self.font = NSFont.monospacedSystemFont(ofSize: 14, weight: .regular)
 
-        super.init(frame: frameRect)
+        super.init(frame: frameRect, device: device ?? MTLCreateSystemDefaultDevice())
 
+        setupMetal()
         calculateCellDimensions()
         setupCursorTimer()
     }
 
-    required init?(coder: NSCoder) {
+    required init(coder: NSCoder) {
         self.font = NSFont.monospacedSystemFont(ofSize: 14, weight: .regular)
         super.init(coder: coder)
+        setupMetal()
         calculateCellDimensions()
         setupCursorTimer()
     }
@@ -35,23 +45,46 @@ class TerminalView: NSView {
         return true
     }
 
+    private func setupMetal() {
+        // Configure Metal view
+        self.colorPixelFormat = .bgra8Unorm
+        self.clearColor = MTLClearColor(red: 0.0, green: 0.0, blue: 0.0, alpha: 1.0)
+        self.framebufferOnly = false
+        self.autoResizeDrawable = true
+        self.preferredFramesPerSecond = 60
+        self.enableSetNeedsDisplay = false
+        self.isPaused = false
+
+        // Create Metal renderer
+        if let metalRenderer = MetalRenderer(font: font) {
+            self.metalRenderer = metalRenderer
+            print("Metal renderer initialized successfully")
+        } else {
+            print("Failed to initialize Metal renderer - falling back would go here")
+        }
+
+        // Set self as delegate for draw callbacks
+        self.delegate = self
+    }
+
     private func calculateCellDimensions() {
-        // Measure a sample character to get cell dimensions
-        let attributes: [NSAttributedString.Key: Any] = [.font: font]
-        let charSize = ("M" as NSString).size(withAttributes: attributes)
-
-        cellWidth = ceil(charSize.width)
-        cellHeight = ceil(charSize.height)
-
-        // Calculate baseline offset for proper text positioning
-        let fontMetrics = font
-        baselineOffset = fontMetrics.ascender
+        if let renderer = metalRenderer {
+            let size = renderer.getCellSize()
+            cellWidth = size.width
+            cellHeight = size.height
+        } else {
+            // Fallback calculation
+            let attributes: [NSAttributedString.Key: Any] = [.font: font]
+            let charSize = ("M" as NSString).size(withAttributes: attributes)
+            cellWidth = ceil(charSize.width)
+            cellHeight = ceil(charSize.height)
+        }
     }
 
     private func setupCursorTimer() {
         cursorTimer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { [weak self] _ in
             self?.cursorVisible.toggle()
-            self?.needsDisplay = true
+            // Metal view will automatically redraw at preferred FPS
         }
     }
 
@@ -61,108 +94,58 @@ class TerminalView: NSView {
         return (rows, cols)
     }
 
-    override func draw(_ dirtyRect: NSRect) {
-        super.draw(dirtyRect)
+    deinit {
+        cursorTimer?.invalidate()
+    }
+}
 
-        guard let terminal = terminal else { return }
-        guard let context = NSGraphicsContext.current?.cgContext else { return }
-
-        // Fill background
-        NSColor.black.setFill()
-        dirtyRect.fill()
-
-        // Flip coordinate system (CoreGraphics is bottom-left origin)
-        context.saveGState()
-        context.translateBy(x: 0, y: bounds.height)
-        context.scaleBy(x: 1.0, y: -1.0)
-
-        // Draw each row
-        for row in 0..<terminal.rows {
-            let cells = terminal.getRow(row)
-            drawRow(row: Int(row), cells: cells, context: context)
+// MARK: - MTKViewDelegate
+extension TerminalView: MTKViewDelegate {
+    func mtkView(_ view: MTKView, drawableSizeWillChange size: CGSize) {
+        // Update terminal size when view resizes
+        if let terminal = terminal {
+            let gridSize = calculateGridSize(for: size)
+            terminal.resize(rows: gridSize.rows, cols: gridSize.cols)
         }
 
-        // Draw cursor
-        if cursorVisible {
-            drawCursor(context: context)
+        // Update renderer
+        if let terminal = terminal {
+            metalRenderer?.resize(rows: Int(terminal.rows), cols: Int(terminal.cols))
+        }
+    }
+
+    func draw(in view: MTKView) {
+        guard let terminal = terminal,
+              let metalRenderer = metalRenderer,
+              let drawable = currentDrawable else {
+            return
         }
 
-        context.restoreGState()
+        // Calculate FPS
+        let currentTime = CACurrentMediaTime()
+        if lastFrameTime > 0 {
+            let delta = currentTime - lastFrameTime
+            frameCount += 1
+            if frameCount >= 60 {
+                fps = Double(frameCount) / (currentTime - lastFrameTime + delta * Double(frameCount - 1))
+                // Uncomment to print FPS: print("FPS: \(String(format: "%.1f", fps))")
+                frameCount = 0
+            }
+        }
+        lastFrameTime = currentTime
+
+        // Render using Metal
+        metalRenderer.render(terminal: terminal,
+                           to: drawable,
+                           viewportSize: drawableSize)
 
         // Mark terminal as clean after rendering
         terminal.markClean()
     }
+}
 
-    private func drawRow(row: Int, cells: [CCell], context: CGContext) {
-        let y = CGFloat(row) * cellHeight
-
-        for (col, cell) in cells.enumerated() {
-            let x = CGFloat(col) * cellWidth
-
-            // Draw background
-            let bgColor = NSColor(
-                red: CGFloat(cell.bg_r) / 255.0,
-                green: CGFloat(cell.bg_g) / 255.0,
-                blue: CGFloat(cell.bg_b) / 255.0,
-                alpha: 1.0
-            )
-
-            context.setFillColor(bgColor.cgColor)
-            context.fill(CGRect(x: x, y: y, width: cellWidth, height: cellHeight))
-
-            // Draw character if not space
-            let char = Unicode.Scalar(cell.ch)
-            if let scalar = char, scalar != " " {
-                let string = String(scalar)
-                let fgColor = NSColor(
-                    red: CGFloat(cell.fg_r) / 255.0,
-                    green: CGFloat(cell.fg_g) / 255.0,
-                    blue: CGFloat(cell.fg_b) / 255.0,
-                    alpha: 1.0
-                )
-
-                // Build attributes with flags
-                var attributes: [NSAttributedString.Key: Any] = [
-                    .font: font,
-                    .foregroundColor: fgColor
-                ]
-
-                // Handle text attributes
-                if (cell.flags & 0x01) != 0 { // Bold
-                    attributes[.font] = NSFont.monospacedSystemFont(ofSize: font.pointSize, weight: .bold)
-                }
-
-                if (cell.flags & 0x04) != 0 { // Underline
-                    attributes[.underlineStyle] = NSUnderlineStyle.single.rawValue
-                }
-
-                // Draw text (need to flip Y coordinate for text)
-                let textY = bounds.height - y - cellHeight + (cellHeight - baselineOffset) / 2
-                let textRect = CGRect(x: x, y: textY, width: cellWidth, height: cellHeight)
-
-                context.saveGState()
-                context.translateBy(x: 0, y: bounds.height)
-                context.scaleBy(x: 1.0, y: -1.0)
-
-                (string as NSString).draw(in: textRect, withAttributes: attributes)
-
-                context.restoreGState()
-            }
-        }
-    }
-
-    private func drawCursor(context: CGContext) {
-        guard let terminal = terminal else { return }
-
-        let cursor = terminal.cursorPosition
-        let x = CGFloat(cursor.col) * cellWidth
-        let y = CGFloat(cursor.row) * cellHeight
-
-        // Draw cursor as filled rectangle
-        context.setFillColor(NSColor.white.cgColor)
-        context.fill(CGRect(x: x, y: y, width: cellWidth, height: cellHeight))
-    }
-
+// MARK: - TerminalView Input Handling
+extension TerminalView {
     // MARK: - Keyboard Input
 
     override func keyDown(with event: NSEvent) {
@@ -254,9 +237,5 @@ class TerminalView: NSView {
         if let string = pasteboard.string(forType: .string) {
             _ = terminal.sendInput(string)
         }
-    }
-
-    deinit {
-        cursorTimer?.invalidate()
     }
 }
