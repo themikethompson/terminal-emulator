@@ -169,14 +169,15 @@ class MetalRenderer {
         cellDataArray.reserveCapacity(rows * cols)
 
         for row in 0..<rows {
-            guard let rowData = terminal.getRow(row) else { continue }
+            let rowData = terminal.getRow(UInt16(row))
+            guard !rowData.isEmpty else { continue }
 
             for col in 0..<cols {
                 guard col < rowData.count else { break }
                 let cell = rowData[col]
 
                 // Get glyph from cache (or cache it if not present)
-                let char = cell.character
+                let char = UnicodeScalar(cell.ch) ?? UnicodeScalar(32)!
                 let glyphInfo = glyphCache.getGlyph(for: char, bold: cell.isBold, italic: cell.isItalic)
 
                 // Calculate cell position in pixels
@@ -184,15 +185,15 @@ class MetalRenderer {
                 let y = Float(row) * Float(cellHeight)
 
                 // Convert colors to SIMD4<Float>
-                let fg = colorToFloat4(cell.foreground)
-                let bg = colorToFloat4(cell.background)
+                let fg = SIMD4<Float>(Float(cell.fg_r) / 255.0, Float(cell.fg_g) / 255.0, Float(cell.fg_b) / 255.0, 1.0)
+                let bg = SIMD4<Float>(Float(cell.bg_r) / 255.0, Float(cell.bg_g) / 255.0, Float(cell.bg_b) / 255.0, 1.0)
 
                 let cellData = CellData(
                     position: SIMD2<Float>(x, y),
                     glyphTexCoords: glyphInfo.texCoords,
                     foreground: fg,
                     background: bg,
-                    flags: cell.flags,
+                    flags: UInt32(cell.flags),
                     _padding: SIMD3<UInt32>(0, 0, 0)
                 )
 
@@ -314,7 +315,7 @@ class MetalRenderer {
 }
 
 // MARK: - Terminal Cell Extension
-extension TerminalCore.Cell {
+extension CCell {
     var isBold: Bool { (flags & 0x01) != 0 }
     var isItalic: Bool { (flags & 0x02) != 0 }
     var isUnderline: Bool { (flags & 0x04) != 0 }

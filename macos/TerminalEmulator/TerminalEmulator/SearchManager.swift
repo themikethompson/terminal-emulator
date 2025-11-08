@@ -50,7 +50,8 @@ class SearchManager {
 
         // Search through all visible rows
         for row in 0..<Int(terminal.rows) {
-            guard let rowData = terminal.getRow(row) else { continue }
+            let rowData = terminal.getRow(UInt16(row))
+            guard !rowData.isEmpty else { continue }
 
             let rowText = rowData.map { String(UnicodeScalar($0.ch) ?? " ") }.joined()
 

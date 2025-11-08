@@ -247,7 +247,8 @@ class SessionManager {
         var rows: [[TerminalSession.GridState.CellState]] = []
 
         for row in 0..<Int(terminal.rows) {
-            guard let rowData = terminal.getRow(row) else { continue }
+            let rowData = terminal.getRow(UInt16(row))
+            guard !rowData.isEmpty else { continue }
 
             let cellStates = rowData.map { cell in
                 TerminalSession.GridState.CellState(
@@ -258,7 +259,7 @@ class SessionManager {
                     bg_r: cell.bg_r,
                     bg_g: cell.bg_g,
                     bg_b: cell.bg_b,
-                    flags: cell.flags
+                    flags: UInt32(cell.flags)
                 )
             }
 

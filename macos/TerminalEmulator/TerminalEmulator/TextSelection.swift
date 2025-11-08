@@ -170,7 +170,8 @@ class TextSelectionManager {
         case .character, .word, .line:
             // Standard selection - copy continuous text
             for row in norm.start.row...norm.end.row {
-                guard let rowData = terminal.getRow(row) else { continue }
+                let rowData = terminal.getRow(UInt16(row))
+                guard !rowData.isEmpty else { continue }
 
                 let startCol = (row == norm.start.row) ? norm.start.col : 0
                 let endCol = (row == norm.end.row) ? norm.end.col : rowData.count - 1
@@ -196,7 +197,8 @@ class TextSelectionManager {
             let maxCol = max(sel.start.col, sel.end.col)
 
             for row in minRow...maxRow {
-                guard let rowData = terminal.getRow(row) else { continue }
+                let rowData = terminal.getRow(UInt16(row))
+                guard !rowData.isEmpty else { continue }
 
                 for col in minCol...min(maxCol, rowData.count - 1) {
                     let cell = rowData[col]
@@ -279,13 +281,15 @@ extension TextSelectionManager {
             startSelection(at: position, mode: .block)
         } else if clickCount == 2 {
             // Double-click: word selection
-            if let rowData = terminal.getRow(row), col < rowData.count {
+            let rowData = terminal.getRow(UInt16(row))
+            if !rowData.isEmpty && col < rowData.count {
                 let text = rowData.map { String(UnicodeScalar($0.ch) ?? " ") }.joined()
                 expandToWord(in: text, at: position)
             }
         } else if clickCount == 3 {
             // Triple-click: line selection
-            if let rowData = terminal.getRow(row) {
+            let rowData = terminal.getRow(UInt16(row))
+            if !rowData.isEmpty {
                 selectLine(at: position, lineLength: rowData.count)
             }
         } else {

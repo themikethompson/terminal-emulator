@@ -197,8 +197,9 @@ class GlyphCache {
             let srcOffset = y * width * 4
             let dstY = currentY + y
             let dstOffset = (dstY * atlasSize + currentX) * 4
+            let srcRange = srcOffset..<(srcOffset + width * 4)
             atlasPixels.replaceSubrange(dstOffset..<(dstOffset + width * 4),
-                                       with: pixels[srcOffset..<(srcOffset + width * 4)])
+                                       with: UnsafeBufferPointer(start: pixels + srcOffset, count: width * 4))
         }
 
         // Update texture region

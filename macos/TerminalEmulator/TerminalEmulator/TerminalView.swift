@@ -238,8 +238,4 @@ extension TerminalView {
             _ = terminal.sendInput(string)
         }
     }
-
-    deinit {
-        cursorTimer?.invalidate()
-    }
 }
